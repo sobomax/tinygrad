@@ -4,13 +4,22 @@ from tinygrad.helpers import diskcache, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
-CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#include <stdbool.h>\n'  # noqa: E501
+CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define __bf16 __fp16\n#define uchar unsigned char\n#include <stdbool.h>\n'  # noqa: E501
+
+CLANG_CMD = 'clang'
+for clang_ver in ('-15', '-14', '-13', '-12', '-11', ''):
+    _CLANG_CMD = f'{CLANG_CMD}{clang_ver}'
+    try: subprocess.check_output(args=(_CLANG_CMD, '--version'))
+    except FileNotFoundError: continue
+    CLANG_CMD = _CLANG_CMD
+    break
+else: raise RuntimeError(f'{CLANG_CMD} is not installed')
 
 @diskcache
 def compile_clang(prg:str, header:str=CLANG_PROGRAM_HEADER) -> bytes:
   # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
   with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    subprocess.check_output(args=('clang -shared -march=native -O2 -Wall -Werror -x c -fPIC - -o '+str(output_file.name)).split(), input=(header+prg).encode('utf-8'))  # noqa: E501
+    subprocess.check_output(args=(f'{CLANG_CMD} -shared -march=native -O2 -Wall -Werror -x c -fPIC - -o '+str(output_file.name)).split(), input=(header+prg).encode('utf-8'))  # noqa: E501
     return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
