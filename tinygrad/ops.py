@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, Mapping
 import functools
-from enum import Enum, auto
-from tinygrad.helpers import prod, DType, dedup
+from enum import auto
+from tinygrad.helpers import prod, DType, dedup, FastEnum
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 
@@ -10,14 +10,14 @@ from dataclasses import dataclass
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: rdna3 only has RECIP and not DIV. DIV and POW are on the chopping block
-class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
-class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); XOR = auto() # noqa: E702
-class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
-class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
-class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
+class UnaryOps(FastEnum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
+class BinaryOps(FastEnum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); XOR = auto() # noqa: E702
+class TernaryOps(FastEnum): MULACC = auto(); WHERE = auto() # noqa: E702
+class ReduceOps(FastEnum): SUM = auto(); MAX = auto() # noqa: E702
+class BufferOps(FastEnum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 # Ops below this line are not allowed in ASTs
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
+class MovementOps(FastEnum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
+class LoadOps(FastEnum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
@@ -50,12 +50,11 @@ class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
   arg: Any = None
+  def __post_init__(self): object.__setattr__(self, '_hash', hash((self.op,self.src, self.arg)))
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(sum([x.buffers for x in self.src], ())))
-  @functools.cached_property
-  def hash(self): return hash((self.op,self.src, self.arg))
-  def __hash__(self): return self.hash
+  def __hash__(self): return self._hash # type: ignore[attr-defined]
 
   def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp:
     return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)

@@ -4,6 +4,7 @@ import numpy as np
 from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Set
+from enum import Enum
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -338,3 +339,8 @@ def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, e
   evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: evdestroy(ev)
   return ret.value * 1e-3
+
+class FastEnum(Enum):
+  @functools.cached_property
+  def hash(self): return hash((self.__class__.__name__, self.value))
+  def __hash__(self): return self.hash

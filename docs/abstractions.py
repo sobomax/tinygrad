@@ -14,8 +14,9 @@ this documentation will help with entry points and understanding the abstraction
 # == Boilerplate imports for typing ==
 from __future__ import annotations
 from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
-from enum import Enum, auto
+from enum import auto
 from abc import ABC
+from tinygrad.helpers import FastEnum
 
 # %%
 # == Example: Tensor 2+3 ==
@@ -99,12 +100,12 @@ class LazyOp:
   arg: Optional[Any] = None                    # and an optional static argument
 
 # there's currently 26 Ops you have to implement for an accelerator.
-class UnaryOps(Enum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
-class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
-class ReduceOps(Enum):   SUM = auto();  MAX = auto()
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
-class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
-class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
+class UnaryOps(FastEnum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
+class BinaryOps(FastEnum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
+class ReduceOps(FastEnum):   SUM = auto();  MAX = auto()
+class MovementOps(FastEnum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
+class TernaryOps(FastEnum):  MULACC = auto(); WHERE = auto()
+class LoadOps(FastEnum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
 # NOTE: if you have a CompiledBuffer(DeviceBuffer)
 #       you do not need to implement the MovementOps
 #       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
@@ -229,7 +230,7 @@ np.testing.assert_allclose(numpy_out, numpy_a+numpy_b)
 # the first step of transforming an AST into code is to "linearize" it, think like toposort on the AST
 # for that, we use the Linearizer, which turns an AST into a list of (linear) UOps
 
-class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto();
+class UOps(FastEnum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto();
 
 class UOp:
   uop: UOps
