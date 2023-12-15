@@ -117,8 +117,9 @@ class TestBFloat16DType(unittest.TestCase):
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
     t.realize()
-    back = t.cast(dtypes.float32)
-    assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
+    for _t in dtypes.float32, dtypes.float16:
+      back = t.cast(_t)
+      assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
