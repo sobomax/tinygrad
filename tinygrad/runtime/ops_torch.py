@@ -3,10 +3,11 @@ from typing import Dict, Callable
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, Op
 from tinygrad.device import Interpreted, Allocator
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv, flatten
+from tinygrad.helpers import getenv, flatten, try_import
 from tinygrad.runtime.ops_cpu import einsum_mulacc, reduce_axis
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
+device = torch.device("cuda:0" if torch.cuda.is_available() else ("xpu" if getenv("XPU", 0) and try_import('intel_extension_for_pytorch')
+                                                                   else ("mps" if getenv("MPS", 0) else "cpu")))
 type_map = {torch.bool: dtypes.bool,
             torch.int8: dtypes.int8, torch.uint8: dtypes.uint8, torch.int16: dtypes.int16, torch.int32: dtypes.int32, torch.int64: dtypes.int64,
             torch.float16: dtypes.float16, torch.bfloat16: dtypes.bfloat16, torch.float32: dtypes.float32, torch.float64: dtypes.float64}
