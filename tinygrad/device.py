@@ -26,7 +26,8 @@ class _Device:
     return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else (f"{ele}:{getenv(ele)}"
+                                                                           if getenv(ele) > 1 else val), self._buffers, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "CUDA", "GPU"]:
       try:
