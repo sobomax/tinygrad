@@ -15,15 +15,17 @@ def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
+def cl_auto(ap, *a, _i=init_c_var, _c=ctypes.c_uint32, _ot=ctypes.c_uint32, c1=check, c2=check):
+  return (_i((_ot * n.value)(), lambda x: c2(ap(*a, n.value, x, None))), n) if (n:=_i(_c(), lambda x: c1(ap(*a, 0, None, ctypes.byref(x))))) else None
+
 def compile_cl(prg:str) -> bytes:
-  assert CLDevice.compiler_context is not None, 'OpenCL requires a "compiler_context" to compile, init a device before you call this'
-  program = checked(cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg_bytes := prg.encode()]),
+  assert CLDevice.c_ctx is not None, 'OpenCL requires a "c_ctx" to compile, init a device before you call this'
+  program = checked(cl.clCreateProgramWithSource(CLDevice.c_ctx.context, 1, to_char_p_p([prg_bytes := prg.encode()]),
                                                  ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
-  status = cl.clBuildProgram(program, 1, ctypes.byref(CLDevice.compiler_context.device_id), None, cl.clBuildProgram.argtypes[4](), None)
+  status = cl.clBuildProgram(program, 1, ctypes.byref(CLDevice.c_ctx.device_id), None, cl.clBuildProgram.argtypes[4](), None)
   if status != 0:
-    cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))  # noqa: E501
-    cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)  # noqa: E501
-    raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
+    ms, ls = cl_auto(cl.clGetProgramBuildInfo, program, CLDevice.c_ctx.device_id, cl.CL_PROGRAM_BUILD_LOG, _ot=ctypes.c_char, _c=ctypes.c_size_t)
+    raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(ms, size=ls.value).decode()}")
   binary_sizes = init_c_var((ctypes.c_size_t * 1)(), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
   binary = init_c_var(ctypes.create_string_buffer(binary_sizes[0]), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p), ctypes.byref((ctypes.c_void_p * 1)(ctypes.addressof(x))), None)))  # noqa: E501
   check(cl.clReleaseProgram(program))
@@ -40,8 +42,8 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
 
   def __del__(self):
-    check(cl.clReleaseKernel(self.kernel))
-    check(cl.clReleaseProgram(self.program))
+    if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
+    if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
 
   def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
@@ -49,12 +51,11 @@ class CLProgram:
     if local_size is not None: global_size = tuple(int(g*l) for g,l in zip(global_size, local_size))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))  # noqa: E501
-    if wait:
-      check(cl.clWaitForEvents(1, ctypes.byref(event)))
-      start = init_c_var(ctypes.c_uint64(), lambda x: check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_START, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
-      end = init_c_var(ctypes.c_uint64(), lambda x: check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_END, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
-      return float(end.value-start.value) * OSX_TIMING_RATIO * 1e-9
-    return None
+    if not wait: return
+    check(cl.clWaitForEvents(1, ctypes.byref(event)))
+    start = init_c_var(ctypes.c_uint64(), lambda x: check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_START, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
+    end = init_c_var(ctypes.c_uint64(), lambda x: check(cl.clGetEventProfilingInfo(event, cl.CL_PROFILING_COMMAND_END, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
+    return float(end.value-start.value) * OSX_TIMING_RATIO * 1e-9
 
 class CLAllocator(LRUAllocator):
   def __init__(self, device:CLDevice):
@@ -75,23 +76,28 @@ class CLAllocator(LRUAllocator):
     self.device.synchronize()
 
 class CLDevice(Compiled):
-  device_ids = None                 # this is global and only initted once
-  compiler_context = None           # this is the first created context. we make an assumption they are all the same for the compiler
+  # device_ids is global and only initted once. c_ctx is the first created context, we assume they are all the same for the compiler
+  device_ids = c_ctx = None
   def __init__(self, device:str=""):
+    chosen_device_id = 1 if ":" not in device else int(device.split(":")[1])
     if CLDevice.device_ids is None:
-      num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
-      platform_ids = init_c_var((cl.cl_platform_id * num_platforms.value)(), lambda x: check(cl.clGetPlatformIDs(num_platforms.value, x, None)))
-      for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
-        num_devices = ctypes.c_uint32()
-        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(num_devices))
-        if err == 0 and num_devices.value != 0: break
-      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))  # noqa: E501
-
-    self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
-    self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
-    if CLDevice.compiler_context is None: CLDevice.compiler_context = self
-    self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
+      platform_ids, num_platforms = cl_auto(cl.clGetPlatformIDs, _ot=cl.cl_platform_id)
+      usable_devices = []
+      for i, pid in enumerate(platform_ids):
+        for dtype in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
+          devices, ndevices = r if (r:=cl_auto(cl.clGetDeviceIDs, pid, dtype, _ot=cl.cl_device_id, c1=lambda x: x)) else (None, None)
+          if not ndevices or ndevices.value == 0: continue
+          usable_devices.extend([devices[i] for i in range(int(ndevices.value))])
+          break
+      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {len(usable_devices)} devices")
+      for i, device_id in enumerate(usable_devices if DEBUG >= 1 else ()):
+        name_buffer, _ = cl_auto(cl.clGetDeviceInfo, device_id, cl.CL_DEVICE_NAME, _ot=ctypes.c_char, _c=ctypes.c_size_t)
+        print(f"Device {'*' if (chosen_device_id - 1) == i else ' '}{i+1}: {name_buffer.value.decode()}")
+      CLDevice.device_ids = tuple(usable_devices)
+    d = self.device_id = CLDevice.device_ids[chosen_device_id-1]
+    self.context = checked((f:=cl.clCreateContext)(None, 1, ctypes.byref(d), f.argtypes[3](), None, ctypes.byref(s:=ctypes.c_int32())), s)  # noqa: E501
+    if CLDevice.c_ctx is None: CLDevice.c_ctx = self
+    self.queue = checked(cl.clCreateCommandQueue(self.context, d, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(s)), s)
     self.pending_copyin: List[memoryview] = []
     super().__init__(CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer, compile_cl, functools.partial(CLProgram, self))
   def synchronize(self):
