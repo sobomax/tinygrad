@@ -62,7 +62,7 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      if k in state_dict or not strict: v.assign(state_dict[k].to(v.device)).realize()
+      if k in state_dict or strict: v.assign(state_dict[k].to(v.device)).realize()
       elif DEBUG >= 1: print(f"WARNING: not loading {k}")
 
 # torch support!
