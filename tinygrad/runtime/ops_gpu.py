@@ -40,8 +40,8 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
 
   def __del__(self):
-    check(cl.clReleaseKernel(self.kernel))
-    check(cl.clReleaseProgram(self.program))
+    if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
+    if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
 
   def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
@@ -78,17 +78,33 @@ class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
   compiler_context = None           # this is the first created context. we make an assumption they are all the same for the compiler
   def __init__(self, device:str=""):
+    chosen_device_id = 0 if ":" not in device else int(device.split(":")[1])
     if CLDevice.device_ids is None:
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
       platform_ids = init_c_var((cl.cl_platform_id * num_platforms.value)(), lambda x: check(cl.clGetPlatformIDs(num_platforms.value, x, None)))
-      for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
-        num_devices = ctypes.c_uint32()
-        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(num_devices))
-        if err == 0 and num_devices.value != 0: break
-      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))  # noqa: E501
-
-    self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
+      usable_devices = {}
+      for i, pid in enumerate(platform_ids):
+        for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
+          num_devices = ctypes.c_uint32()
+          err = cl.clGetDeviceIDs(pid, device_type, 0, None, ctypes.byref(num_devices))
+          if err == 0 and num_devices.value != 0:  usable_devices[i] = (int(num_devices.value), device_type)
+      ndevices = sum([x[0] for x in usable_devices.values()])
+      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {ndevices} devices")
+      CLDevice.device_ids = (cl.cl_device_id * ndevices)()
+      idx = 0
+      for i, dinfo in usable_devices.items():
+          device_type, _num_devices = dinfo
+          check(cl.clGetDeviceIDs(platform_ids[i], device_type, _num_devices, CLDevice.device_ids[idx], None))  # noqa: E501
+          idx += _num_devices
+      for i in range(ndevices) if DEBUG > 1 else ():
+        device_id = CLDevice.device_ids[i]
+        size = ctypes.c_size_t()
+        check(cl.clGetDeviceInfo(device_id, cl.CL_DEVICE_NAME, 0, None, ctypes.byref(size)))
+        name_buffer = ctypes.create_string_buffer(size.value)
+        check(cl.clGetDeviceInfo(device_id, cl.CL_DEVICE_NAME, size, name_buffer, None))
+        device_name = name_buffer.value.decode()
+        print(f"Device {'*' if chosen_device_id == i else ' '}{i}: {device_name}")
+    self.device_id = CLDevice.device_ids[chosen_device_id]
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
