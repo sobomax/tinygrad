@@ -67,6 +67,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
 
   return tuple(reversed(new_mask)), False
 
+# A View maps an n-dimensional tensor to 1D memory. For View v and 1D memory src, v(i0, i1, ...) = src[ΣN(iN * v.strides[N]) + v.offset] if no mask
+# or within mask limits, else 0. If materialized, v adopts a contiguous layout.
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
