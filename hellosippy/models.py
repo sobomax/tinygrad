@@ -1,7 +1,7 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import fetch, Timing
+from tinygrad.helpers import fetch, Timing, Profiling
 from tinygrad.device import Device
 
 class AmendmentNetwork1Config:
@@ -82,10 +82,10 @@ class AmendmentNetwork1:
 def get_model():
   _m = AmendmentNetwork1()
   d = torch_load(fetch('https://huggingface.co/sobomax/speecht5-rt.post_vocoder.v2/resolve/main/pytorch_model.bin?download=true'))
-  load_state_dict(_m, d, device='CPU')
+  load_state_dict(_m, d)
   return _m
 m = get_model()
-raise Exception("BP")
+#raise Exception("BP")
 from time import sleep
 from sys import stderr
 sleep(1)
@@ -104,8 +104,12 @@ with Timing("Test Data Generation: "):
     batch_size *= 2
   else: stderr.write(f"{msg[:-1]}...Done\n")
 
-for batch_size, data in test_data:
-  with Timing(f"AmendmentNetwork1({batch_size=}): "):
-    for t_mel, t_audio in data:
-      m.forward(t_mel.to(Device.DEFAULT), t_audio.to(Device.DEFAULT)).cpu().realize()
-      #print(f'{t_mel.shape} {t_audio.shape}')
+copyout = True
+with Profiling(sort='cumtime'):
+  for batch_size, data in test_data:
+    with Timing(f"AmendmentNetwork1({batch_size=}): "):
+      for t_mel, t_audio in data:
+        r = m.forward(t_mel.to(Device.DEFAULT), t_audio.to(Device.DEFAULT))
+        if copyout: r = r.cpu()
+        r.realize()
+        #print(f'{t_mel.shape} {t_audio.shape}')
