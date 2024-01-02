@@ -1,10 +1,13 @@
 from __future__ import annotations
+from importlib.util import find_spec as f_s, module_from_spec as m_f_s
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 from urllib import request  # NOTE: this has to be imported specifically
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
+
+def try_import(mod, sym): return s if (ms:=f_s(mod)) and (m:=m_f_s(ms)) and not ms.loader.exec_module(m) and (s:=getattr(m, sym, None)) else None
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -91,7 +94,7 @@ class Timing(contextlib.ContextDecorator):
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
 def _format_fcn(fcn): return f"{fcn[0]}:{fcn[2]}" if fcn[2] != "<genexpr>" else f"{fcn[0]}:{fcn[1]}"
-class Profiling(contextlib.ContextDecorator):
+class Profiling_default(contextlib.ContextDecorator):
   def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
     self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
   def __enter__(self):
@@ -108,6 +111,12 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+
+class Profiling_pyinst(Profiling_default):
+  def __enter__(self): self.pr, _ = ((pr:=Profiler()), pr.start()) if self.enabled else (None, None)
+  def __exit__(self, *exc): _ = self.pr.stop() and print(self.pr.output_text(unicode=True, color=True))
+
+Profiling = Profiling_pyinst if os.getenv("PYINST", False) and (Profiler:=try_import('pyinstrument', 'Profiler')) else Profiling_default
 
 # *** universal database cache ***
 
