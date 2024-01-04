@@ -103,7 +103,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   kernel,prekernel,bufs = [],[],[]
   #pend_close = None
   depth = 1
-  def kk(s): kernel.append("  "*depth+s)
+  def kk(s, preinc:int=0, postinc:int=0):
+    nonlocal depth
+    return (kernel.append("  "*(depth:=depth+preinc)+s), (depth:=depth+postinc))[1]
 
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
@@ -116,17 +118,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
 
   child_count = Counter(v for ru in uops for v in ru.vin)
 
-  for u in uops:
-    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
+  for u,uop,dtype,vin,args in [(u, u.uop,u.dtype,u.vin,u.arg) for u in uops]:
     # these four uops don't have output dtypes
-    if uop == UOps.IF:
-      kk(lang.render_if(r[vin[0]]))
-      depth += 1
-    elif uop == UOps.BARRIER:
-      kk(lang.barrier)
-    elif uop == UOps.END:
-      depth -= 1
-      kk("}")
+    if uop == UOps.IF: kk(lang.render_if(r[vin[0]]), 1)
+    elif uop == UOps.BARRIER: kk(lang.barrier)
+    elif uop == UOps.END: kk("}", preinc=-1)
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       if len(vin) > 3: kk(lang.render_if(r[vin[3]]))
@@ -134,9 +130,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       if len(vin) > 3: kk("}")
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP:
-        kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
-        depth += 1
+      if uop == UOps.LOOP: kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]), 1)
       elif uop == UOps.WMMA:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       elif uop == UOps.ALU:
