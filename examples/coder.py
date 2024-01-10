@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
   # *** app below this line ***
 
-  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant who writes Python code to answer questions. He keeps the code as short as possible and doesn't read from user input")
+  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant LLM with billions of parameters who writes Python code and answers questions. He keeps the code as short as possible.")
 
   PROMPT = getenv("PROMPT", 1)
   temperature = getenv("TEMP", 0.7)
