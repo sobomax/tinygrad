@@ -3,7 +3,7 @@ import sys, math
 from collections import defaultdict
 from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
-from tinygrad.helpers import prod, flatten, getenv, dedup, DEBUG, all_int, all_same, GRAPH
+from tinygrad.helpers import prod, flatten, getenv, dedup, DEBUG, all_int, all_same, GRAPH, merge_dicts
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,6 +147,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
                       realizes:Set[LazyBuffer], cache, first=True) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
+    var_vals.update(merge_dicts([var_vals, buf.st.var_vals]))
     st = buf.st + st
     buf = buf.base
   # all buffers here are base now
@@ -155,14 +156,12 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   # consts are always fused and generated
   if buf.op is LoadOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
-    var_vals.update(st_var_vals)
     return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
     if buf not in inputs: inputs.append(buf)
     unbound_st, st_var_vals = st.simplify().unbind()
-    var_vals.update(st_var_vals)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
   # if a CONTIGUOUS made it all the way here, just skip it
@@ -199,7 +198,8 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), var_vals)]
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
+    [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in op.vars()})]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
