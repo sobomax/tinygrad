@@ -11,8 +11,11 @@ from tinygrad.codegen.kernel import LinearizerOptions
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
 
+class HIPError(RuntimeError):
+  def __init__(self, status): self.status = (super().__init__(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}"), status)[1]
+
 def check(status):
-  if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
+  if status != 0: raise HIPError(status)
 
 # TODO: remove these helpers, they increase complexity
 def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)  # noqa: E501
@@ -46,9 +49,15 @@ class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int): return self.device.hip_scall(alloc_call, hip.hipMalloc, size, chk=False)
+  def _chkd_alloc(self, mfunc, *ma, **mkw):
+    while True:
+      try: return alloc_call(mfunc, *ma, **mkw)
+      except HIPError as ex:
+        if ex.status != 2 or not self.device.pending_copyin: raise
+        self.device.synchronize()
+  def _alloc(self, size:int): return self.device.hip_scall(self._chkd_alloc, hip.hipMalloc, size, chk=False)
   def _free(self, opaque:T): check(hip.hipFree(opaque))
-  def _hostalloc(self, size:int): return alloc_call(hip.hipHostMalloc, size, 0) # <- watchout, this one does not set the device
+  def _hostalloc(self, size:int): return self._chkd_alloc(hip.hipHostMalloc, size, 0) # <- watchout, this one does not set the device
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
     if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
